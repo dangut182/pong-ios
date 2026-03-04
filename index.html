@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <title>Pong 1 vs IA</title>
+
+  <!-- PWA / iOS -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0b0f14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pong">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background:#0b0f14;
+      color:#e6edf3;
+      font-family: system-ui, Arial;
+      overflow:hidden;
+      touch-action: none;
+    }
+    .wrap {
+      height: 100%;
+      width: 100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right)
+               env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    canvas {
+      width: 100vw;
+      height: 100vh;
+      display:block;
+      background:#070a0f;
+    }
+    .hud {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 8px;
+      z-index: 10;
+    }
+    .hud button {
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid #223;
+      background: rgba(10, 14, 20, 0.6);
+      color: #e6edf3;
+      font-weight: 700;
+    }
+    .hint {
+      position: fixed;
+      left: 12px;
+      bottom: 10px;
+      font-size: 12px;
+      opacity:.8;
+      line-height:1.35;
+      user-select:none;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="c"></canvas>
+  </div>
+
+  <div class="hud">
+    <button id="btnPause">Pause</button>
+    <button id="btnReset">Reset</button>
+  </div>
+
+  <div class="hint">
+    iPhone: arrastra el dedo arriba/abajo para mover tu paleta.
+  </div>
+
+  <script>
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d", { alpha: false });
+
+    const paddleW = 14, paddleH = 110;
+    const ballR = 8;
+
+    let W = 900, H = 520; // se recalcula con resize()
+
+    const state = {
+      paused: false,
+      leftScore: 0,
+      rightScore: 0,
+      keys: new Set(),
+      left:  { x: 18, y: 0, vy: 0 },
+      right: { x: 0,  y: 0, vy: 0 }, // IA
+      ball:  { x: 0,  y: 0, vx: 0, vy: 0 }
+    };
+
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+    function resizeCanvas() {
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const cssW = window.innerWidth;
+      const cssH = window.innerHeight;
+
+      canvas.width  = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+      canvas.style.width  = cssW + "px";
+      canvas.style.height = cssH + "px";
+
+      // Dibujar en coordenadas CSS
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      W = cssW;
+      H = cssH;
+
+      // Posiciones base
+      state.left.x = 18;
+      state.right.x = W - 18 - paddleW;
+
+      // Mantener dentro
+      state.left.y  = clamp(state.left.y, 12, H - 12 - paddleH);
+      state.right.y = clamp(state.right.y, 12, H - 12 - paddleH);
+
+      state.ball.x = clamp(state.ball.x || W/2, 30, W - 30);
+      state.ball.y = clamp(state.ball.y || H/2, 30, H - 30);
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("orientationchange", () => setTimeout(resizeCanvas, 200));
+
+    function resetBall(direction = (Math.random() < 0.5 ? -1 : 1)) {
+      state.ball.x = W / 2;
+      state.ball.y = H / 2;
+      const speed = 420; // px/s
+      const angle = (Math.random() * 0.7 - 0.35);
+      state.ball.vx = direction * speed * Math.cos(angle);
+      state.ball.vy = speed * Math.sin(angle);
+    }
+
+    function drawCenterLine() {
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      ctx.setLineDash([10, 14]);
+      ctx.beginPath();
+      ctx.moveTo(W/2, 18);
+      ctx.lineTo(W/2, H-18);
+      ctx.strokeStyle = "#9aa4b2";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawScore() {
+      ctx.save();
+      ctx.fillStyle = "#e6edf3";
+      ctx.globalAlpha = 0.9;
+      ctx.font = "700 42px system-ui, Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(state.leftScore,  W/2 - 80, 58);
+      ctx.fillText(state.rightScore, W/2 + 80, 58);
+      ctx.restore();
+    }
+
+    function drawPaddle(p) {
+      ctx.fillStyle = "#cbd5e1";
+      ctx.fillRect(p.x, p.y, paddleW, paddleH);
+    }
+
+    function drawBall() {
+      ctx.beginPath();
+      ctx.arc(state.ball.x, state.ball.y, ballR, 0, Math.PI * 2);
+      ctx.fillStyle = "#e6edf3";
+      ctx.fill();
+    }
+
+    function collidePaddle(p) {
+      const b = state.ball;
+
+      const bx1 = b.x - ballR, bx2 = b.x + ballR;
+      const by1 = b.y - ballR, by2 = b.y + ballR;
+
+      const px1 = p.x, px2 = p.x + paddleW;
+      const py1 = p.y, py2 = p.y + paddleH;
+
+      const hit = bx2 >= px1 && bx1 <= px2 && by2 >= py1 && by1 <= py2;
+      if (!hit) return false;
+
+      // evitar quedarse pegado
+      if (b.vx < 0) b.x = px2 + ballR;
+      else         b.x = px1 - ballR;
+
+      // rebote X
+      b.vx *= -1;
+
+      // "spin" según impacto
+      const hitPos = (b.y - (p.y + paddleH/2)) / (paddleH/2); // -1..1
+      const maxVy = 620;
+      b.vy = clamp(b.vy + hitPos * 280, -maxVy, maxVy);
+
+      // acelera un poco cada golpe
+      const maxVx = 820;
+      b.vx = clamp(b.vx * 1.05, -maxVx, maxVx);
+
+      return true;
+    }
+
+    // IA (dificultad)
+    const AI_MAX_SPEED = 460;
+    const AI_REACTION  = 0.13;
+    const AI_NOISE     = 18;
+    let aiTargetY = 0;
+
+    function updateAI(dt) {
+      const b = state.ball;
+      const r = state.right;
+
+      const ballComing = b.vx > 0;
+
+      if (ballComing) {
+        const trend = b.vy * 0.18;
+        const noise = (Math.random() - 0.5) * 2 * AI_NOISE;
+        const desired = b.y + trend + noise;
+        aiTargetY = aiTargetY + (desired - aiTargetY) * AI_REACTION;
+      } else {
+        const desired = H/2;
+        aiTargetY = aiTargetY + (desired - aiTargetY) * (AI_REACTION * 0.55);
+      }
+
+      const centerY = r.y + paddleH/2;
+      const error = aiTargetY - centerY;
+      const vy = clamp(error * 6, -AI_MAX_SPEED, AI_MAX_SPEED);
+
+      r.y = clamp(r.y + vy * dt, 12, H - 12 - paddleH);
+    }
+
+    function updatePlayer(dt) {
+      // teclado (PC)
+      const speed = 600;
+      state.left.vy = 0;
+      if (state.keys.has("KeyW")) state.left.vy = -speed;
+      if (state.keys.has("KeyS")) state.left.vy =  speed;
+      state.left.y = clamp(state.left.y + state.left.vy * dt, 12, H - 12 - paddleH);
+    }
+
+    function updateBall(dt) {
+      const b = state.ball;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+
+      // rebote arriba/abajo
+      if (b.y - ballR <= 10) { b.y = 10 + ballR; b.vy *= -1; }
+      if (b.y + ballR >= H - 10) { b.y = H - 10 - ballR; b.vy *= -1; }
+
+      collidePaddle(state.left);
+      collidePaddle(state.right);
+
+      // score
+      if (b.x + ballR < 0) {
+        state.rightScore++;
+        resetBall(+1);
+      } else if (b.x - ballR > W) {
+        state.leftScore++;
+        resetBall(-1);
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, W, H);
+
+      // marco
+      ctx.strokeStyle = "#1f2a44";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(10, 10, W-20, H-20);
+
+      drawCenterLine();
+      drawScore();
+      drawPaddle(state.left);
+      drawPaddle(state.right);
+      drawBall();
+
+      if (state.paused) {
+        ctx.save();
+        ctx.fillStyle = "rgba(0,0,0,0.45)";
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = "#e6edf3";
+        ctx.font = "700 34px system-ui, Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("PAUSA", W/2, H/2);
+        ctx.restore();
+      }
+    }
+
+    // Loop
+    let last = performance.now();
+    function loop(now) {
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+
+      if (!state.paused) {
+        updatePlayer(dt);
+        updateAI(dt);
+        updateBall(dt);
+      }
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    // teclado (PC)
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "KeyP") { state.paused = !state.paused; return; }
+      if (e.code === "Space") { state.leftScore = 0; state.rightScore = 0; resetBall(); return; }
+      state.keys.add(e.code);
+    });
+    window.addEventListener("keyup", (e) => state.keys.delete(e.code));
+
+    // Touch (iPhone): arrastra en la mitad izquierda
+    function setLeftPaddleFromClientY(clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const y = clientY - rect.top;
+      state.left.y = clamp(y - paddleH / 2, 12, H - 12 - paddleH);
+    }
+
+    canvas.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      if (t.clientX < window.innerWidth * 0.65) setLeftPaddleFromClientY(t.clientY);
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      if (t.clientX < window.innerWidth * 0.65) setLeftPaddleFromClientY(t.clientY);
+    }, { passive: false });
+
+    // Botones
+    document.getElementById("btnPause").addEventListener("click", () => {
+      state.paused = !state.paused;
+    });
+
+    document.getElementById("btnReset").addEventListener("click", () => {
+      state.leftScore = 0;
+      state.rightScore = 0;
+      resetBall();
+    });
+
+    // Init
+    resizeCanvas();
+    state.left.y = (H - paddleH) / 2;
+    state.right.y = (H - paddleH) / 2;
+    aiTargetY = H/2;
+    resetBall();
+    requestAnimationFrame(loop);
+  </script>
+
+  <!-- Service Worker -->
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./service-worker.js");
+      });
+    }
+  </script>
+</body>
+</html>
